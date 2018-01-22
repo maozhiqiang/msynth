@@ -1,2 +1,2 @@
 # msynth
-Neural audio synthesis built on Pyo engine
+Neural audio synthesis built on pyo engine
