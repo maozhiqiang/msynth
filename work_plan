@@ -1,0 +1,26 @@
+Title:
+  Neural audio synthesis built on pyo engine
+
+Description:
+  This projet focuses on bridging the gap between the pyo library for sound generation and manipulation, and the
+  Google Magenta framework, as well as exploring the creative possibilities of neural audio synthesis through 
+  pyo.
+  
+ Needs:
+  - Provide wrapper functions (API) to send information from pyo directly to Magenta neural networks.
+  - Use the signal processing capabilities of pyo to generate interesting sounds with Magenta.
+  - Provide an interface to make this form of audio synthesis more accessible to musicians. 
+  
+ Knowledge:
+  - Become familiar with the architecture behind neural networks used for audio synthesis (such as Wavenet).
+  - Understand the Magenta code and the type of input format to be sent from pyo.
+  - Learn to create an interface that streamlines the interaction process between pyo and Magenta (text-based or
+  graphical interface?)
+  
+  Model:
+    Neural audio synthesis essentially tries to fulfill the goal of learning the makeup of different classes of sounds
+    and generate new ones from this acquired knowledge.
+    
+    
+  
+  
