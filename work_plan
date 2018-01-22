@@ -24,7 +24,7 @@ Description:
     and generate new ones from this acquired knowledge.
     
     Google Magenta trained its neural network on thousands of sounds from various instruments to learn the structure
-    behind their timbre. This results in generated sounds that are harmonically rich and esthetically pleasant, thus
+    behind their timbre (dataset called NSynth). This results in generated sounds that are harmonically rich and esthetically pleasant, thus
     fulfilling the goal of making interesting sounds that can be used by musicians to record music.
     
     Pyo is a module for python written in C to help with signal processing. Sound that is processed using pyo can
