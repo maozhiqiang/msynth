@@ -78,7 +78,7 @@ Returns:
 def mu_law(x, mu):
 
     #normalize input between 1 and -1
-    x_norm = x / (mu / 2)
+    x_norm = x
 
     return np.sign(x_norm) * np.log(1 + np.abs(x_norm) * mu) / np.log(1 + mu)
 
@@ -145,9 +145,19 @@ def load_batch(path, sample_rate):
 
 
 """
-Function that takes vector and returns the category to which it belongs
+Function that takes vector and returns the labesl distribution to which it belongs
 
 Args:
     
 
 """
+def get_labels(x, bins):
+
+    y = np.int32(np.floor(x * bins))
+    y = y[0, 0, :, 0]
+
+    out = np.zeros([1, 1, y.shape[0], bins])
+
+    out[:, :, np.arange(y.shape[0]), y] = 1
+
+    return out
