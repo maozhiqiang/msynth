@@ -14,7 +14,7 @@ Inverse autoregressive flows (part of my implementation of the Parallel Wavenet)
 https://arxiv.org/pdf/1606.04934.pdf
 ***
 
-Use tensorflow (version 1.5.0) and most recent version of librosa
+Use tensorflow (version 1.5.0), numpy, pyo (0.8.8) and most recent version of librosa
 
 
 See test_magenta.py file to see why need to implement Parallel Wavenet model (So slow!!)
