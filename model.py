@@ -8,8 +8,8 @@ class Wavenet(object):
                  hidden_units,
                  output_classes,
                  padding="VALID",
-                 num_layers=4,
-                 num_stages=2):
+                 num_layers=1,
+                 num_stages=1):
 
         #Eventually replace with variable shape
         inputs = tf.placeholder(tf.float32, shape=[1, 1, 1024, 1])
@@ -29,7 +29,13 @@ class Wavenet(object):
             l = dilated_conv(h, name, filter_width, hidden_units, 2 ** (i % num_stages))
 
             # modify to have gated acitvation as in wavenet (i.e. create appropraiate function)
-            l = tf.nn.relu(l)
+            t = dilated_conv(l, "tanh_{0}".format(i), filter_width, hidden_units, 1)
+            t = tf.tanh(t)
+
+            s = dilated_conv(l, "sig_{0}".format(i), filter_width, hidden_units, 1)
+            s = tf.sigmoid(s)
+
+            l = t * s
 
             # 1x1 convolution
             l = dilated_conv(l, "1x1_{0}".format(i), 1, hidden_units)
@@ -59,18 +65,19 @@ class Wavenet(object):
                               output_classes)
 
 
-
         # Compute cross-entropy
         loss = tf.nn.softmax_cross_entropy_with_logits(logits=outputs,
                                                               labels=targets)
 
         loss = tf.reduce_mean(loss)
-        print(loss)
+
+        train_step = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss)
 
         self.inputs = inputs
         self.targets = targets
         self.outputs = outputs
         self.loss = loss
+        self.train_step = train_step
 
 
 
