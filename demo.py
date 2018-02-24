@@ -13,14 +13,9 @@ file = file.reshape([1, 1, shape[0], 1])
 
 # get probability distribution for the labels. Used in cross-entropy loss during training
 #targets = get_labels(file, 256) this is for categorical
-# targets = file * 128 + 128
+# targets = file * 128 + 128 this will be used later by the student Wavenet
 targets = np.ones(shape=[1,1,1024,1], dtype=np.float32)
 
-
-# Use these instead for the feed_dict to test behaviour
-temp = np.random.rand(1, 1, 1024, 1)
-temp1 = np.random.rand(1, 1, 1024, 256)
-temp1 = temp1 / np.sum(temp1, axis=2, keepdims=True)
 
 
 
@@ -42,5 +37,5 @@ with tf.Session() as sess:
         print("Error_{0} is: ".format(i), error)
         i+=1
 
-        if error < 1:
+        if error < 0.1:
             break
