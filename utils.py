@@ -179,7 +179,7 @@ Args:
     
     shape: shape of input tensor that will be fed at run time
     
-    params: list of parameter tuples (location, scale) to be used in mixture model
+    params: parameter tuple (location, scale) to be used in mixture model
     
     max: max possible value of discrete input x
     
@@ -192,17 +192,48 @@ Returns:
 """
 
 
-def disc_log_mixt(x, shape, params, max, min):
+def disc_log_mixt(x, params, max, min):
 
     func = 0
 
-    upper = tf.where(x == max, x + np.inf, x + 0.5)
+    upper = tf.where(x >= max, x + np.inf, x + 0.5)
 
-    lower = tf.where(x == min, x - np.inf, x - 0.5)
+    lower = tf.where(x <= min, x - np.inf, x - 0.5)
 
-    for m, s in params:
+    m = params[0]
+    s = params[1]
 
-        func += tf.sigmoid((upper - m) / s) - tf.sigmoid((lower - m) / s)
+    func = tf.sigmoid((upper - m) / s) - tf.sigmoid((lower - m) / s)
 
-        print(func)
+    print(func)
+
     return func
+
+
+"""
+Function that is used to return the KL divergence between the probabilites of the student
+and the teacher
+
+Args:
+    z: tensor (noise) that is fed to the IAF to generate output
+
+    s_probs: probabilities returned by a the IAF for a given input
+    
+    t_probs: probabilities returned by the TeacherWavenet for the same input
+    
+    location: location of the IAF distribution for each sample
+    
+    scale: scale of the IAF distribution for each sample
+    
+Returns:
+    loss: the KL divergence between the two probability distributions 
+"""
+
+
+def kull_leib(z, s_probs, t_probs, location, scale):
+
+    entropy_term = tf.reduce_mean(tf.reduce_sum(tf.log(scale), 2)) + 2 * int(z.shape[2])
+
+    cross_entropy_term = - tf.reduce_sum(tf.reduce_mean((s_probs * tf.log(t_probs)), 0))
+
+    return cross_entropy_term - entropy_term
