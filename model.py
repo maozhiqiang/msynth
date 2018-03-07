@@ -4,6 +4,8 @@ from utils import *
 class TeacherWavenet(object):
 
     def __init__(self,
+                 inputs,
+                 targets,
                  filter_width,
                  hidden_units,
                  output_classes,
@@ -11,11 +13,6 @@ class TeacherWavenet(object):
                  padding="VALID",
                  num_layers=4,
                  num_stages=2):
-
-        # Eventually replace with variable shape
-        inputs = tf.placeholder(tf.float32, shape=[1, 1, 1024, 1])
-
-        targets = tf.placeholder(tf.float32, shape=[1, 1, 1024, output_classes])
 
         h = dilated_conv(inputs, "start_conv", filter_width, hidden_units, trainable=training)
 
@@ -67,9 +64,9 @@ class TeacherWavenet(object):
 
         # Compute cross-entropy // modify to use KL divergence??
         loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits,
-                                                       labels=targets)
+                                                       labels=targets) if training else None
 
-        loss = tf.reduce_mean(loss)
+        loss = tf.reduce_mean(loss) if training else None
 
         train_step = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss) if training else None
 
@@ -169,7 +166,7 @@ class StudentWavenetComp(object):
 
         self.inputs = inputs
         self.location = outputs[:, :, :, :1]
-        self.scale = outputs[:, :, :, 1:]
+        self.scale = tf.abs(outputs[:, :, :, 1:])  # ????????? leave this or not ?????????
 
 
 # this will implement the Inverse autoregressive flow using StudentWavenetComp's
@@ -177,14 +174,12 @@ class StudentWavenetComp(object):
 class IAF(object):
 
     def __init__(self,
-                 teacher,
                  flows,
                  filter_width,
                  hidden_units,
                  training):
 
-        # eventually replace shape with variable shape
-        inputs = tf.placeholder(tf.float32, shape=[1, 1, 1024, 1])
+        inputs = tf.placeholder(dtype=tf.float32, shape=[1, 1, 1024, 1])
 
         flow = inputs
 
@@ -210,6 +205,17 @@ class IAF(object):
         # obtain the probabilities for each sample
         probs = disc_log_mixt(flow, [location, scale], 65535., 0.)
 
+        # regenerate the Teacher Wavenet and optimize
+        teacher = TeacherWavenet(inputs=flow,
+                                 targets=None,
+                                 filter_width=3,
+                                 hidden_units=64,
+                                 output_classes=1,
+                                 training=False)
+
+        # obtain non trainable weights
+        restore = [weight for weight in tf.global_variables() if weight not in tf.trainable_variables()]
+
         # use the KL divergence instead and feed it the teacher probs output
         loss = kull_leib(z=inputs,
                          s_probs=probs,
@@ -225,3 +231,5 @@ class IAF(object):
         self.train_step = train_step
         self.params = [location, scale]
         self.probs = probs
+        self.test = tf.sigmoid(teacher.logits)
+        self.restore = restore
