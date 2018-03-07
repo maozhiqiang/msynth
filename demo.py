@@ -20,7 +20,9 @@ with tf.Session() as train_sess:
     i = 0
 
     # Create a single Wavenet structure
-    train_net = TeacherWavenet(filter_width=3,
+    train_net = TeacherWavenet(inputs=tf.placeholder(dtype=tf.float32, shape=[1, 1, 1024, 1]),
+                               targets=tf.placeholder(dtype=tf.float32, shape=[1, 1, 1024, 1]),
+                               filter_width=3,
                                hidden_units=64,
                                output_classes=1,
                                training=True)
@@ -54,24 +56,37 @@ tf.reset_default_graph()
 Using the same file as used in training, therefore the probabilities will be high
 Eventually, we'll be using the generated audio files from the student Wavenet
 """
+
 with tf.Session() as pred_sess:
 
     i = 0
 
-    # Needs to have same structure as the trained version
-    pred_net = TeacherWavenet(filter_width=3,
-                              hidden_units=64,
-                              output_classes=1,
-                              training=True)
+    # create IAF and then train it
+    iaf = IAF(flows=4,
+              filter_width=3,
+              hidden_units=64,
+              training=True)
 
     # Saver to save the model after training
-    saver = tf.train.Saver()
+    saver = tf.train.Saver(iaf.restore)
 
     saver.restore(pred_sess, "/tmp/ParallelWavenet.ckpt")
 
     print("Model restored")
 
-    pred = pred_sess.run([tf.sigmoid(pred_net.outputs)],
-                         feed_dict={pred_net.inputs: file})
+    pred_sess.run(tf.global_variables_initializer())
 
-    print("These are the output probabilities for each sample: {0}".format(pred))
+    while True:
+
+        error, _ = pred_sess.run([iaf.loss, iaf.train_step],
+                                      feed_dict={iaf.inputs: file})
+
+        print("The gen error_{0} is {1}".format(i, error))
+
+        i += 1
+
+        if error < 0.1:
+
+            save_path = saver.save(pred_sess, "/tmp/IAF.ckpt")
+
+            break
