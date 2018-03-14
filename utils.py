@@ -38,14 +38,17 @@ def dilated_conv(x,
         assert x.shape[1] == 1
         assert name
 
-        print("X: ", x.shape)  # Used to test shapes. Remove after
+        print(name, " X: ", x.shape)  # Used to test shapes. Remove after
 
         batch_size, _, time, in_channel = x.shape
 
+        init1 = tf.constant_initializer(np.zeros(shape=[batch_size, filter_width, in_channel, out_channel],
+                                                 dtype=np.float32))
+
         w = tf.get_variable(name="w",
-                            shape=[1, filter_width, in_channel,  out_channel],
+                            shape=[batch_size, filter_width, in_channel,  out_channel],
                             dtype=x.dtype,
-                            initializer=tf.random_normal_initializer(),
+                            initializer=tf.random_normal_initializer(stddev=0.1),
                             trainable=trainable)
 
         y = tf.nn.atrous_conv2d(value=x,
@@ -55,13 +58,16 @@ def dilated_conv(x,
 
         _, y_2, y_3, _ = y.shape
 
+        init2 = tf.constant_initializer(np.zeros(shape=[batch_size, y_2, y_3, out_channel],
+                                                dtype=np.float32))
+
         b = tf.get_variable(name="b",
-                            shape=[1, y_2, y_3, out_channel],
+                            shape=[batch_size, y_2, y_3, out_channel],
                             dtype=x.dtype,
-                            initializer=tf.random_normal_initializer(),
+                            initializer=tf.random_normal_initializer(stddev=0.1),
                             trainable=trainable)
 
-        print("Y: ", y.shape)  # Used to test shapes. Remove after
+        print(name, " Y: ", y.shape)  # Used to test shapes. Remove after
 
     return y + b
 
@@ -131,6 +137,27 @@ def load_audio(file_path, sample_rate):
 
 
 """
+Function that takes a numpy array and returns an audio file
+
+Args:
+    save_path: absolute path to save the file
+    
+    input: input numpy array to save
+    
+    sample_rate: sampling rate of the audio file in hertz
+    
+Returns:
+    output: audio file in .wav format
+
+"""
+
+
+def save_audio(save_path, input, sample_rate):
+
+    return librosa.output.write_wav(save_path , input, sample_rate)
+
+
+"""
 Function that loads a batch of audio files in the wav format
 
 Args:
@@ -192,20 +219,18 @@ Returns:
 """
 
 
-def disc_log_mixt(x, params, max, min):
-
-    func = 0
-
-    upper = tf.where(x >= max, x + np.inf, x + 0.5)
-
-    lower = tf.where(x <= min, x - np.inf, x - 0.5)
+def disc_log_mixt(x, params, maximum, minimum):
 
     m = params[0]
     s = params[1]
 
-    func = tf.sigmoid((upper - m) / s) - tf.sigmoid((lower - m) / s)
+    upper = tf.sigmoid((x + 0.5 - m) / s)
 
-    print(func)
+    lower = tf.sigmoid((x - 0.5 - m) / s)
+
+    func = tf.where(x >= maximum, tf.ones(dtype=tf.float32, shape=x.shape), upper)
+
+    func = tf.where(func <= minimum, tf.zeros(dtype=tf.float32, shape=x.shape), lower)
 
     return func
 
@@ -232,8 +257,50 @@ Returns:
 
 def kull_leib(z, s_probs, t_probs, location, scale):
 
+    t_probs_0 = tf.where(t_probs <= 0., t_probs + 0.01, t_probs)
+
     entropy_term = tf.reduce_mean(tf.reduce_sum(tf.log(scale), 2)) + 2 * int(z.shape[2])
 
-    cross_entropy_term = - tf.reduce_sum(tf.reduce_mean((s_probs * tf.log(t_probs)), 0))
+    cross_entropy_term = - tf.reduce_sum(tf.reduce_mean((s_probs * tf.log(t_probs_0)), 0))
 
     return cross_entropy_term - entropy_term
+
+
+"""
+Function that returns the power loss of a signal. Essentially finds the spectograms
+of the generated audio snippet and the input and subtracts them. It then computes the
+magnitude-squared of the result to get the power loss
+
+Args:
+    gen: generated audio input
+    
+    input: existing input
+    
+Returns:
+    loss: power loss given the inputs
+"""
+
+
+def power_loss(gen, input):
+    pass
+
+
+"""
+Function that generates a bunch of sine waves at different frequencies that will be used
+to train the model as an example.
+
+Args:
+    length: duration of the audio stream in samples
+
+Returns:
+    list: numpy array of sine waves as arrays of numbers that will be used by the program to train
+"""
+
+
+def train_sine(length):
+
+    freq_list = [32 * i for i in range(1,33)]
+
+    sine_list = np.array([[np.sin(2. * np.pi * i * j / 44100.) for i in range(length)] for j in freq_list])
+
+    return sine_list
