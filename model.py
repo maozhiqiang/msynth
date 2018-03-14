@@ -11,8 +11,8 @@ class TeacherWavenet(object):
                  output_classes,
                  training,
                  padding="VALID",
-                 num_layers=4,
-                 num_stages=2):
+                 num_layers=30,
+                 num_stages=10):
 
         h = dilated_conv(inputs, "start_conv", filter_width, hidden_units, trainable=training)
 
@@ -99,8 +99,8 @@ class StudentWavenetComp(object):
                  hidden_units,
                  training,
                  padding="VALID",
-                 num_layers=4,
-                 num_stages=2):
+                 num_layers=10,
+                 num_stages=10):
 
         h = dilated_conv(inputs,
                          "flow_{0}_start_conv".format(flow),
@@ -174,12 +174,11 @@ class StudentWavenetComp(object):
 class IAF(object):
 
     def __init__(self,
+                 inputs,
                  flows,
                  filter_width,
                  hidden_units,
                  training):
-
-        inputs = tf.placeholder(dtype=tf.float32, shape=[1, 1, 1024, 1])
 
         flow = inputs
 
@@ -221,9 +220,9 @@ class IAF(object):
                          s_probs=probs,
                          t_probs=tf.sigmoid(teacher.logits),
                          location=location,
-                         scale=scale)
+                         scale=scale) if training else None
 
-        train_step = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss)
+        train_step = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss) if training else None
 
         self.inputs = inputs
         self.outputs = flow
@@ -233,3 +232,4 @@ class IAF(object):
         self.probs = probs
         self.test = tf.sigmoid(teacher.logits)
         self.restore = restore
+
