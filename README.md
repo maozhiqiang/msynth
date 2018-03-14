@@ -22,4 +22,5 @@ Dependencies:
 
 
 See test_magenta.py (also need magenta dependency) file to see why need to implement Parallel Wavenet model (So slow!!)
-See the demo.py file to verify that everything runs correctly (and for instructions)
+See train.py to train model on pure tones (temporary). WARNING! This is extremely resource intensive
+See gen.py to generate the new files using the model trained in train.py
