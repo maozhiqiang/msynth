@@ -1,37 +1,49 @@
 from model import *
 
-def generate():
+sess = tf.Session()
 
-    with tf.Session() as sess:
+def restore(sess, shape):
 
-        # generate random noise input
-        gen = np.random.logistic(0., 1., [32, 1, 7680, 1])
+    # create IAF and load previously trained weights
+    iaf = IAF(inputs=tf.placeholder(dtype=tf.float32, shape=shape),
+              flows=1,
+              filter_width=3,
+              hidden_units=2,
+              output_classes=2,
+              training=False)
 
-        # create IAF and load previously trained weights
-        iaf = IAF(inputs=tf.placeholder(dtype=tf.float32, shape=gen.shape),
-                  flows=4,
-                  filter_width=3,
-                  hidden_units=64,
-                  training=False)
+    load = tf.train.Saver()
 
-        load = tf.train.Saver()
+    load.restore(sess, "/tmp/IAF.ckpt")
 
-        load.restore(sess, "/tmp/IAF.ckpt")
+    print("Model restored")
 
-        print("Model restored")
+    return iaf
 
-        outputs = sess.run(iaf.outputs,
-                           feed_dict={iaf.inputs: gen})
+
+def generate(sess, iaf):
+
+    # generate random noise input
+    gen = np.random.logistic(0., 1., [32, 1, 10, 1])
+
+    outputs = sess.run(iaf.outputs,
+                       feed_dict={iaf.inputs: gen})
 
     return outputs
 
 
-outputs = generate()
+iaf = restore(sess, [32, 1, 10, 1])
 
-outputs = outputs / 32768. - 1.
+outputs = generate(sess, iaf)
 
-outputs = outputs.reshape(outputs, (32 * 7680,))
+for i in range(9999):
 
-for i in range(32):
+    outputs = np.concatenate([outputs, generate(sess, iaf)], axis=2)
 
-    save_audio("/tmp/gen_file_{0}".format(i), outputs[32 * i: 32 * (i + 1)], 44100)
+    # outputs = outputs / 32767.5 - 1.
+
+file = outputs.reshape([outputs.shape[0], outputs.shape[2]])
+
+for i in range(2):
+
+    save_audio("/tmp/gen_file_{0}.wav".format(i), file[i], 44100)
