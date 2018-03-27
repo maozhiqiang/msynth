@@ -8,11 +8,13 @@ class TeacherWavenet(object):
                  targets,
                  filter_width,
                  hidden_units,
-                 output_classes,
-                 training,
+                 output_classes=2,
+                 training=True,
                  padding="VALID",
-                 num_layers=30,
-                 num_stages=10):
+                 num_layers=12,
+                 num_stages=4):
+
+        assert output_classes % 2 == 0 and hidden_units % 2 == 0
 
         h = dilated_conv(inputs, "start_conv", filter_width, hidden_units, trainable=training)
 
@@ -25,11 +27,13 @@ class TeacherWavenet(object):
             lay_ = dilated_conv(h, name, filter_width, hidden_units, 2 ** (i % num_stages), trainable=training)
 
             # modify to have gated acitvation as in wavenet (i.e. create appropraiate function)
-            tanh = dilated_conv(lay_, "tanh_{0}".format(i), filter_width, hidden_units, 1, trainable=training)
-            tanh = tf.tanh(tanh)
+            lay_ = dilated_conv(lay_, "tanh_sig_{0}".format(i), filter_width, hidden_units, 1, trainable=training)
 
-            sig = dilated_conv(lay_, "sig_{0}".format(i), filter_width, hidden_units, 1, trainable=training)
-            sig = tf.sigmoid(sig)
+            mid = int(hidden_units / 2)
+
+            tanh = tf.tanh(lay_[:, :, :, :mid])
+
+            sig = tf.sigmoid(lay_[:, :, :, mid:])
 
             lay_ = tanh * sig
 
@@ -56,25 +60,38 @@ class TeacherWavenet(object):
         skip = tf.nn.relu(skip)
 
         # logits of the prob. Can recover prob with sig(logits)
-        logits = dilated_conv(skip,
+        params = dilated_conv(skip,
                               "1x1_{0}".format(num_layers+2),
                               filter_width,
                               output_classes,
                               trainable=training)
 
-        # Compute cross-entropy // modify to use KL divergence??
-        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits,
-                                                       labels=targets) if training else None
+        mid = int(output_classes / 2)
 
-        loss = tf.reduce_mean(loss) if training else None
+        location = params[:, :, :, :mid]
 
-        train_step = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss) if training else None
+        # ensure that the scale parameter is > 0
+        scale = tf.nn.relu(params[:, :, :, mid:]) + tf.log(1. + tf.exp(-tf.abs(params[:, :, :, mid:])))
+
+        logits = log_mixt(inputs, location, scale)
+
+        log_probs = -tf.log(1. + tf.exp(-tf.abs(logits)))
+
+        log_probs = tf.where(logits <= 0., log_probs + logits, log_probs)
+
+        # Compute cross-entropy. Uses hard prob. Modify to allow soft prob also
+        loss = tf.reduce_mean(tf.reduce_sum(-log_probs, 2)) if training else None
+
+        train_step = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss) if training else None
 
         self.inputs = inputs
         self.targets = targets
         self.logits = logits
         self.loss = loss
         self.train_step = train_step
+        self.scale = scale
+        self.location = location
+        self.log_probs = log_probs
 
     """
     This function trains the model using an Adam Optimizer to learn the optimal weights
@@ -97,10 +114,13 @@ class StudentWavenetComp(object):
                  flow,
                  filter_width,
                  hidden_units,
-                 training,
+                 output_classes,
+                 training=True,
                  padding="VALID",
-                 num_layers=10,
-                 num_stages=10):
+                 num_layers=4,
+                 num_stages=2):
+
+        assert hidden_units % 2 == 0 and output_classes % 2 == 0
 
         h = dilated_conv(inputs,
                          "flow_{0}_start_conv".format(flow),
@@ -119,21 +139,18 @@ class StudentWavenetComp(object):
                                 trainable=training)
 
             # modify to have gated acitvation as in wavenet (i.e. create appropraiate function)
-            tanh = dilated_conv(lay_,
-                                "flow_{0}_tanh_{1}".format(flow, i),
+            lay_ = dilated_conv(lay_,
+                                "flow_{0}_tanh_sig_{1}".format(flow, i),
                                 filter_width,
                                 hidden_units,
                                 1,
                                 trainable=training)
-            tanh = tf.tanh(tanh)
 
-            sig = dilated_conv(lay_,
-                               "flow_{0}_sig_{1}".format(flow, i),
-                               filter_width,
-                               hidden_units,
-                               1,
-                               trainable=training)
-            sig = tf.sigmoid(sig)
+            mid = int(hidden_units / 2)
+
+            tanh = tf.tanh(lay_[:, :, :, :mid])
+
+            sig = tf.sigmoid(lay_[:, :, :, mid:])
 
             lay_ = tanh * sig
 
@@ -149,24 +166,31 @@ class StudentWavenetComp(object):
 
         h = tf.nn.relu(h)
 
-        outputs = dilated_conv(h,
+        params = dilated_conv(h,
                                "flow_{0}_1x1_{1}".format(flow, num_layers + 1),
                                filter_width,
-                               2,
+                               output_classes,
                                trainable=training)
 
-        outputs = tf.nn.relu(outputs)
+        params = tf.nn.relu(params)
 
         # output mean and standard deviation for each sample. The 2 values of dimension 4
-        outputs = dilated_conv(outputs,
+        params = dilated_conv(params,
                                "flow_{0}_1x1_{1}".format(flow, num_layers + 2),
                                filter_width,
-                               2,
+                               output_classes,
                                trainable=training)
 
+        mid = int(output_classes / 2)
+
+        location = params[:, :, :, :mid] + 30.
+
+        # ensure that the scale paramters are > 0
+        scale = tf.nn.relu(params[:, :, :, mid:]) + tf.log(1. + tf.exp(-tf.abs(params[:, :, :, mid:])))
+
         self.inputs = inputs
-        self.location = outputs[:, :, :, :1]
-        self.scale = tf.abs(outputs[:, :, :, 1:])  # ????????? leave this or not ?????????
+        self.location = location
+        self.scale = scale
 
 
 # this will implement the Inverse autoregressive flow using StudentWavenetComp's
@@ -178,6 +202,7 @@ class IAF(object):
                  flows,
                  filter_width,
                  hidden_units,
+                 output_classes,
                  training):
 
         flow = inputs
@@ -194,42 +219,39 @@ class IAF(object):
                                        flow=i,
                                        filter_width=filter_width,
                                        hidden_units=hidden_units,
+                                       output_classes=output_classes,
                                        training=training)
 
             flow = block.scale * flow + block.location
 
             location = location * block.scale + block.location
-            scale = block.scale * scale
+            scale = tf.abs(block.scale * scale)
 
-        # obtain the probabilities for each sample
-        probs = disc_log_mixt(flow, [location, scale], 65535., 0.)
+        # obtain the log probabilities for each sample
+        logits = log_mixt(flow, location, scale)
 
         # regenerate the Teacher Wavenet and optimize
         teacher = TeacherWavenet(inputs=flow,
                                  targets=None,
                                  filter_width=3,
                                  hidden_units=64,
-                                 output_classes=1,
+                                 output_classes=output_classes,
                                  training=False)
 
         # obtain non trainable weights
         restore = [weight for weight in tf.global_variables() if weight not in tf.trainable_variables()]
 
         # use the KL divergence instead and feed it the teacher probs output
-        loss = kull_leib(z=inputs,
-                         s_probs=probs,
-                         t_probs=tf.sigmoid(teacher.logits),
-                         location=location,
-                         scale=scale) if training else None
+        loss = kl_div(teacher.log_probs, scale) if training else None
 
-        train_step = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss) if training else None
+        train_step = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss) if training else None
 
         self.inputs = inputs
-        self.outputs = flow
+        self.outputs = discretize(flow, 65535.)
         self.loss = loss
         self.train_step = train_step
         self.params = [location, scale]
-        self.probs = probs
-        self.test = tf.sigmoid(teacher.logits)
+        self.test = teacher.log_probs
+        self.teach_logits = teacher.logits
         self.restore = restore
 
