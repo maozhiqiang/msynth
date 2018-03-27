@@ -35,7 +35,7 @@ def dilated_conv(x,
     # check if height of input is 1
     with tf.variable_scope(name):
 
-        assert x.shape[1] == 1
+        assert x.shape[1] == 1, x.shape[3] == 1
         assert name
 
         print(name, " X: ", x.shape)  # Used to test shapes. Remove after
@@ -48,7 +48,7 @@ def dilated_conv(x,
         w = tf.get_variable(name="w",
                             shape=[batch_size, filter_width, in_channel,  out_channel],
                             dtype=x.dtype,
-                            initializer=tf.random_normal_initializer(stddev=0.1),
+                            initializer=tf.random_normal_initializer(stddev=0.01),
                             trainable=trainable)
 
         y = tf.nn.atrous_conv2d(value=x,
@@ -64,7 +64,7 @@ def dilated_conv(x,
         b = tf.get_variable(name="b",
                             shape=[batch_size, y_2, y_3, out_channel],
                             dtype=x.dtype,
-                            initializer=tf.random_normal_initializer(stddev=0.1),
+                            initializer=tf.random_normal_initializer(stddev=0.01),
                             trainable=trainable)
 
         print(name, " Y: ", y.shape)  # Used to test shapes. Remove after
@@ -219,20 +219,39 @@ Returns:
 """
 
 
+# get rid of this shite!!!!!!!!!!!!!!!!!!!!!!!
 def disc_log_mixt(x, params, maximum, minimum):
 
     m = params[0]
     s = params[1]
 
-    upper = tf.sigmoid((x + 0.5 - m) / s)
+    func = tf.sigmoid((x + 0.5 - m) / s) - tf.sigmoid((x - 0.5 - m) / s)
 
-    lower = tf.sigmoid((x - 0.5 - m) / s)
+    upper = tf.where(x >= maximum, 1.0 - tf.sigmoid((0.95 - m) / s), func)
 
-    func = tf.where(x >= maximum, tf.ones(dtype=tf.float32, shape=x.shape), upper)
+    lower = tf.where(x <= minimum, tf.sigmoid((0.5 - m) / s), upper)
 
-    func = tf.where(func <= minimum, tf.zeros(dtype=tf.float32, shape=x.shape), lower)
+    return lower
 
-    return func
+
+def log_mixt(x, m, s):
+
+    z = -tf.abs((x - m) / s)
+
+    logits = z - tf.log(s + s * tf.exp(2. * z) + (2. * s - 1.) * tf.exp(z))
+
+    return tf.reduce_mean(logits, 3, keepdims=True)
+
+
+def discretize(x, max):
+
+    discrete_x = tf.where(x <= 0., tf.zeros(x.shape, dtype=tf.float32), x)
+
+    discrete_x = tf.where(discrete_x >= max, tf.ones(shape=x.shape, dtype=tf.float32) * max, discrete_x)
+
+    discrete_x = tf.floor(discrete_x)
+
+    return discrete_x
 
 
 """
@@ -257,13 +276,27 @@ Returns:
 
 def kull_leib(z, s_probs, t_probs, location, scale):
 
-    t_probs_0 = tf.where(t_probs <= 0., t_probs + 0.01, t_probs)
+    t_probs_0 = tf.where(t_probs <= 0., t_probs + 0.01, t_probs) # remove ?????????
 
-    entropy_term = tf.reduce_mean(tf.reduce_sum(tf.log(scale), 2)) + 2 * int(z.shape[2])
+    entropy_term = -s_probs * tf.log(s_probs) - (1. - s_probs) * tf.log(1. - s_probs)#-s_probs * tf.log(scale)
 
-    cross_entropy_term = - tf.reduce_sum(tf.reduce_mean((s_probs * tf.log(t_probs_0)), 0))
+    entropy_term = tf.reduce_mean(tf.reduce_sum(entropy_term, 2)) #+ 2 * int(z.shape[2])
 
-    return cross_entropy_term - entropy_term
+    cross_entropy_term = -s_probs * tf.log(t_probs) - (1. - s_probs) * tf.log(1. - t_probs)
+
+    cross_entropy_term = tf.reduce_sum(tf.reduce_mean(cross_entropy_term, 0))
+
+    return cross_entropy_term - entropy_term #cross_entropy_term - entropy_term
+
+
+# p_t is log probabilities #############
+def kl_div(p_t, scale):
+
+    cross_entropy = tf.reduce_sum(tf.reduce_mean(-p_t, 0))
+
+    entropy = tf.reduce_mean(tf.reduce_sum(tf.log(scale), 2)) + int(p_t.shape[2])
+
+    return cross_entropy - entropy
 
 
 """
@@ -296,10 +329,10 @@ Returns:
     list: numpy array of sine waves as arrays of numbers that will be used by the program to train
 """
 
-
+# modify after!!!!!!!!!!!!!!!!!!!
 def train_sine(length):
 
-    freq_list = [32 * i for i in range(1,33)]
+    freq_list = [32 + (i + 1) for i in range(32)]
 
     sine_list = np.array([[np.sin(2. * np.pi * i * j / 44100.) for i in range(length)] for j in freq_list])
 
