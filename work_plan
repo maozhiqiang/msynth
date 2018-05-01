@@ -1,47 +1,43 @@
 Title:
-  Neural audio synthesis built on pyo engine
+  Neural audio synthesis model for music creation
 
 Description:
-  This projet focuses on bridging the gap between the pyo library for sound generation and manipulation, and the
-  Google Magenta framework, as well as exploring the creative possibilities of neural audio synthesis through 
-  pyo.
+  This projet focuses on sound generation and manipulation using Parallel Wavenet from Google,
+  as well as exploring the creative possibilities of neural audio synthesis.
   
  Needs:
-  - Provide wrapper functions (API) to send information from pyo directly to Magenta neural networks.
-  - Use the signal processing capabilities of pyo to generate interesting sounds with Magenta.
-  - Provide an interface to make this form of audio synthesis more accessible to musicians through pyo. 
+  - Use the signal processing capabilities of pyo to generate interesting sounds with ParallelWavenet.
+  - Provide an interface to make this form of audio synthesis more accessible to musicians through terminal (eventually, GUI). 
   
  Knowledge:
   - Become familiar with the architecture behind neural networks used for audio synthesis (such as Wavenet).
-  - Understand the Magenta code and the type of input format to be sent from pyo.
-  - Learn to create an interface that streamlines the interaction process between pyo and Magenta (graphical interface)
+  - Understand the Magenta/Wavenet code and the type of input format to be sent to it.
+  - Learn to create an interface that streamlines the interaction process between the user and the model
   - https://arxiv.org/pdf/1704.01279.pdf
   - https://arxiv.org/pdf/1704.01279.pdf
   - https://blog.openai.com/generative-models/
+  - https://arxiv.org/pdf/1711.10433.pdf
   
   Model:
     Neural audio synthesis essentially tries to fulfill the goal of learning the makeup of different classes of sounds
     and generate new ones from this acquired knowledge.
     
-    Google Magenta trained its neural network on thousands of sounds from various instruments to learn the structure
-    behind their timbre (dataset called NSynth). This results in generated sounds that are harmonically rich and esthetically pleasant, thus
+    ParallelWavenet is a neural network trained on thousands of sounds from various sources to learn the structure
+    behind their structure. This results in generated sounds that are natural sounding, thus
     fulfilling the goal of making interesting sounds that can be used by musicians to record music.
     
-    Pyo is a module for python written in C to help with signal processing. Sound that is processed using pyo can
-    then be fed directly to a neural network, that will create variations based on the original signal. These can
+    Sound that is processed (using pyo for example) can then be fed directly to a neural network,
+    that will create variations based on the original signal. These can
     yield examples that would diverge significantly from the typical applications of, say, filters.
     
     Using the built interface, musicians will be able to explore the different possibilities of neural audio synthesis
-    and thus expand their sonic palette. The interface should allow the user to set the parameters of the neural network
-    such as the number of returned variations and the sampling rate of the input.
+    and thus expand their sonic palette.
     
   Methods:
-    - A python wrapper library will allow to conversion of a signal from pyo to the Protocol buffer format used by
-    Magenta
-    
-    - The interface will automate the process of sending the signal from pyo, converting it to Protocol buffers, and
-    encoding it using the Magenta code. This process will also be feeding the signal to the neural network and outputting
-    the wet signal variations (# variations can be set using parameter). This would be realized by sending the signal as
+  
+    - The interface will make the process of sending training data to the model easier, as well as making it easier to generate sounds.
+    This process will also be feeding the signal to the neural network and outputting the wet signal variations
+    (# variations can be set using parameter). This would be realized by sending the signal as
     an array of float numbers to be used as an input by the wrapper library. The user would be able to define a matrix of
     parameters to influence in their pyo script, such as pitch with, say, knobs and faders. 
     
