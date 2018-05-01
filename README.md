@@ -29,7 +29,7 @@ To train model on pure tones (WARNING! This is extremely resource intensive), ru
 
 To train the model on your own batch of audio(WARNING! This is extremely resource intensive), run the following command in your terminal:
 
-  python3 train.py -t [path_to_audio_files] # this is to train the teacher network
+  python3 train.py -t "path_to_audio_files" # this is to train the teacher network
   python3 train.py -s # this is to train the student network
 
 See gen.py to generate the new files using the model trained in train.py
