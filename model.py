@@ -6,7 +6,6 @@ class TeacherWavenet(object):
     def __init__(self,
                  inputs,
                  cond,
-                 targets,
                  filter_width,
                  hidden_units,
                  output_classes=2,
@@ -89,7 +88,6 @@ class TeacherWavenet(object):
 
         self.inputs = inputs
         self.cond = cond
-        self.targets = targets
         self.scale = scale
         self.location = location
         self.log_probs = log_probs
@@ -243,7 +241,7 @@ class IAF(object):
 
         self.inputs = inputs
         self.cond = cond
-        self.outputs = discretize(flow, 65535.)
+        self.outputs = discretize(flow, 65535.) / 32676.5
         self.samples = samples
         self.location = location
         self.scale = scale
