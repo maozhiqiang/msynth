@@ -42,11 +42,8 @@ def dilated_conv(x,
 
         batch_size, _, time, in_channel = x.shape
 
-        init1 = tf.constant_initializer(np.zeros(shape=[batch_size, filter_width, in_channel, out_channel],
-                                                 dtype=np.float32))
-
         w = tf.get_variable(name="w",
-                            shape=[batch_size, filter_width, in_channel,  out_channel],
+                            shape=[1, filter_width, in_channel,  out_channel],
                             dtype=x.dtype,
                             initializer=tf.random_normal_initializer(stddev=0.01),
                             trainable=trainable)
@@ -58,13 +55,10 @@ def dilated_conv(x,
 
         _, y_2, y_3, _ = y.shape
 
-        init2 = tf.constant_initializer(np.zeros(shape=[batch_size, y_2, y_3, out_channel],
-                                                dtype=np.float32))
-
         b = tf.get_variable(name="b",
-                            shape=[batch_size, y_2, y_3, out_channel],
+                            shape=[out_channel],
                             dtype=x.dtype,
-                            initializer=tf.random_normal_initializer(stddev=0.01),
+                            initializer=tf.random_normal_initializer(stddev=0.0),
                             trainable=trainable)
 
         print(name, " Y: ", y.shape)  # Used to test shapes. Remove after
@@ -110,9 +104,9 @@ Returns:
 
 def inv_mu_law(x, mu):
 
-    y = np.sign(x) * (np.sign(x) * np.log(1 + mu) * np.exp(x) - 1)
+    y = np.sign(x) * (1/mu) * ((1. + mu) ** np.abs(x) - 1.)
 
-    return y * mu / 2
+    return y
 
 
 """
@@ -142,7 +136,7 @@ Function that takes a numpy array and returns an audio file
 Args:
     save_path: absolute path to save the file
     
-    input: input numpy array to save
+    x: input numpy array to save
     
     sample_rate: sampling rate of the audio file in hertz
     
@@ -152,9 +146,9 @@ Returns:
 """
 
 
-def save_audio(save_path, input, sample_rate):
+def save_audio(save_path, x, sample_rate):
 
-    return librosa.output.write_wav(save_path , input, sample_rate)
+    return librosa.output.write_wav(save_path, x, sample_rate)
 
 
 """
@@ -198,58 +192,26 @@ def get_labels(x, bins):
 
 
 """
-Function that returns an operator that computes the discrete log mixture to be used instead 
-of the categorial distribution as it is more tractable
+Function that returns an operator that computes the discrete version of a tensor (to nearest
+16-bit value)
 
 Args:
     x: input tensor
     
-    shape: shape of input tensor that will be fed at run time
-    
-    params: parameter tuple (location, scale) to be used in mixture model
-    
-    max: max possible value of discrete input x
-    
-    min: min possbile value of discrete input x
+    nb_bins: 2^number_bits - 1
      
 Returns:
-    op: operator that can compute the discretized prob of an input x
-    
-*** Change the +/- 0.5 tu upper bound / lower bound, add # bits???Remove shape?????***
+    discrete tensor: operator that can compute the discrete version of x
 """
 
 
-# get rid of this shite!!!!!!!!!!!!!!!!!!!!!!!
-def disc_log_mixt(x, params, maximum, minimum):
+def discretize(x, nb_bins):
 
-    m = params[0]
-    s = params[1]
+    discrete_x = tf.where(x <= -1., tf.fill(x.shape, -1.), x)
 
-    func = tf.sigmoid((x + 0.5 - m) / s) - tf.sigmoid((x - 0.5 - m) / s)
+    discrete_x = tf.where(discrete_x >= 1., tf.fill(x.shape, 1.), discrete_x)
 
-    upper = tf.where(x >= maximum, 1.0 - tf.sigmoid((0.95 - m) / s), func)
-
-    lower = tf.where(x <= minimum, tf.sigmoid((0.5 - m) / s), upper)
-
-    return lower
-
-
-def log_mixt(x, m, s):
-
-    z = -tf.abs((x - m) / s)
-
-    logits = z - tf.log(s + s * tf.exp(2. * z) + (2. * s - 1.) * tf.exp(z))
-
-    return tf.reduce_mean(logits, 3, keepdims=True)
-
-
-def discretize(x, max):
-
-    discrete_x = tf.where(x <= 0., tf.zeros(x.shape, dtype=tf.float32), x)
-
-    discrete_x = tf.where(discrete_x >= max, tf.ones(shape=x.shape, dtype=tf.float32) * max, discrete_x)
-
-    discrete_x = tf.floor(discrete_x)
+    discrete_x = tf.round(discrete_x * (nb_bins / 2)) / (nb_bins / 2)
 
     return discrete_x
 
@@ -259,44 +221,30 @@ Function that is used to return the KL divergence between the probabilites of th
 and the teacher
 
 Args:
-    z: tensor (noise) that is fed to the IAF to generate output
-
-    s_probs: probabilities returned by a the IAF for a given input
-    
-    t_probs: probabilities returned by the TeacherWavenet for the same input
-    
-    location: location of the IAF distribution for each sample
+    p_t: log probabilities output by the teacher network
     
     scale: scale of the IAF distribution for each sample
+    
+    num_samples: number of samples for each x_t to calculate cross entropy
     
 Returns:
     loss: the KL divergence between the two probability distributions 
 """
 
 
-def kull_leib(z, s_probs, t_probs, location, scale):
+def kl_div(p_t, scale, num_samples):
 
-    t_probs_0 = tf.where(t_probs <= 0., t_probs + 0.01, t_probs) # remove ?????????
+    p_t_ = tf.reshape(p_t, [num_samples, int(int(p_t.shape[0]) / num_samples), 1, p_t.shape[2], 1])
 
-    entropy_term = -s_probs * tf.log(s_probs) - (1. - s_probs) * tf.log(1. - s_probs)#-s_probs * tf.log(scale)
+    # cross entropy term
+    loss = tf.reduce_mean(-p_t_, 0)
 
-    entropy_term = tf.reduce_mean(tf.reduce_sum(entropy_term, 2)) #+ 2 * int(z.shape[2])
+    # expectation over p_s(x_<t) and then sum over t=1,...,T
+    loss = tf.reduce_sum(tf.reduce_mean(loss, axis=0))
 
-    cross_entropy_term = -s_probs * tf.log(t_probs) - (1. - s_probs) * tf.log(1. - t_probs)
+    loss -= tf.reduce_mean(tf.reduce_sum(tf.log(scale), 2)) + 2. * int(scale.shape[2])
 
-    cross_entropy_term = tf.reduce_sum(tf.reduce_mean(cross_entropy_term, 0))
-
-    return cross_entropy_term - entropy_term #cross_entropy_term - entropy_term
-
-
-# p_t is log probabilities #############
-def kl_div(p_t, scale):
-
-    cross_entropy = tf.reduce_sum(tf.reduce_mean(-p_t, 0))
-
-    entropy = tf.reduce_mean(tf.reduce_sum(tf.log(scale), 2)) + int(p_t.shape[2])
-
-    return cross_entropy - entropy
+    return loss
 
 
 """
@@ -307,14 +255,14 @@ magnitude-squared of the result to get the power loss
 Args:
     gen: generated audio input
     
-    input: existing input
+    x: existing input
     
 Returns:
     loss: power loss given the inputs
 """
 
 
-def power_loss(gen, input):
+def power_loss(gen, x):
     pass
 
 
@@ -329,11 +277,16 @@ Returns:
     list: numpy array of sine waves as arrays of numbers that will be used by the program to train
 """
 
-# modify after!!!!!!!!!!!!!!!!!!!
+
 def train_sine(length):
 
-    freq_list = [32 + (i + 1) for i in range(32)]
+    freq_list = [32 + (i + 1) for i in range(1024)]
 
     sine_list = np.array([[np.sin(2. * np.pi * i * j / 44100.) for i in range(length)] for j in freq_list])
 
     return sine_list
+
+
+def get_batch(x, batch, block, batch_size, block_size):
+
+    return x[batch * batch_size:(batch + 1) * batch_size, :, block * block_size:(block + 1) * block_size, :]
