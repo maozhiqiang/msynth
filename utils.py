@@ -58,7 +58,7 @@ def dilated_conv(x,
         b = tf.get_variable(name="b",
                             shape=[out_channel],
                             dtype=x.dtype,
-                            initializer=tf.random_normal_initializer(stddev=0.0),
+                            initializer=tf.random_normal_initializer(stddev=0.01),
                             trainable=trainable)
 
         print(name, " Y: ", y.shape)  # Used to test shapes. Remove after
@@ -85,7 +85,7 @@ def mu_law(x, mu):
     # normalize input between 1 and -1
     x_norm = x
 
-    return np.sign(x_norm) * np.log(1 + np.abs(x_norm) * mu) / np.log(1 + mu)
+    return np.sign(x) * np.log(1. + np.abs(x) * mu) / np.log(1. + mu)
 
 
 """
