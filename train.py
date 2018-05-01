@@ -1,5 +1,6 @@
 from model import *
 import sys
+import os
 
 
 # number of samples in each block
@@ -9,32 +10,57 @@ block_size = 15
 nb_blocks = 1
 
 # batch size
-batch_size = 32
+batch_size = 2
 
-# Change the file_path to specify the path to your audio file
-file = train_sine(block_size * nb_blocks)
 
-# Compute the mu-law of the file to restrict the number of possible values. Here we use 16-bit mu-law
-file = np.rint((mu_law(file, 65535)) * 32767.5) #/ 32767.5
+def train_set(path):
 
-shape = file.shape
+    if path is None:
+        audio_files = train_sine(block_size * nb_blocks)
+    else:
+        audio_files = None
 
-# Reshape input to 4D
-file = file.reshape([shape[0], 1, shape[1], 1])
+        for filename in os.listdir(path):
 
-# get probability distribution for the labels (soft probs). Used in KL loss during training
-targets = np.full([batch_size, 1, block_size, 1], 1. / batch_size, dtype=np.float32)
+            if filename.endswith(".wav"):
+                batch = np.expand_dims(load_audio(path + "/" + filename, 44100)[0], 0)
 
-# total number of batches
-nb_batches = int(file.shape[0] / batch_size + 1) if file.shape[0] % batch_size != 0 else int(file.shape[0] / batch_size)
-print(nb_batches)
+                if audio_files is None:
+                    audio_files = batch
+                else:
+                    audio_files = np.concatenate((audio_files, batch))
 
-def train_teacher():
+
+
+    # Compute the mu-law of the file to restrict the number of possible values. Here we use 16-bit mu-law
+    audio_files = np.rint((mu_law(audio_files, 65535)) * 32767.5) / 32767.5
+
+    shape = audio_files.shape
+
+    print(audio_files)
+
+    # Reshape input to 4D
+    audio_files = audio_files.reshape([shape[0], 1, shape[1], 1])
+
+    # total number of batches
+    nb_batches = int(audio_files.shape[0] / batch_size + 1) if audio_files.shape[0] % batch_size != 0 \
+        else int(audio_files.shape[0] / batch_size)
+    print(nb_batches)
+
+    return audio_files, nb_batches
+
+
+
+
+def train_teacher(path):
 
     print("Training teacher")
 
     # train the TeacherWavenet
     with tf.Session() as sess:
+
+        # get set of audio files and the number of mini-batches
+        audio_files, nb_batches = train_set(path)
 
         epoch = 0
 
@@ -44,17 +70,16 @@ def train_teacher():
         # current block number
         block_id = 0
 
-        batch = get_batch(file, batch_id, block_id, batch_size, block_size)
+        batch = get_batch(audio_files, batch_id, block_id, batch_size, block_size)
 
         # Conditioning inputs. Start off with 0's.
         prev = np.zeros([batch_size, 1, block_size, 1], np.float32)
 
-        h, w, in_ch, out_ch = file.shape
+        h, w, in_ch, out_ch = audio_files.shape
 
         # Create a single Wavenet structure
         train_net = TeacherWavenet(inputs=tf.placeholder(dtype=tf.float32, shape=batch.shape),
                                    cond=tf.placeholder(dtype=tf.float32, shape=batch.shape),
-                                   targets=tf.placeholder(dtype=tf.float32, shape=targets.shape),
                                    filter_width=3,
                                    hidden_units=64,
                                    output_classes=2,
@@ -76,7 +101,7 @@ def train_teacher():
                 print("Trainig epoch {0}".format(epoch))
 
             _, probs, m, s, error = sess.run([train_step, train_net.log_probs, train_net.location, train_net.scale, loss],
-                                       feed_dict={train_net.inputs: batch, train_net.cond: prev, train_net.targets: targets})
+                                       feed_dict={train_net.inputs: batch, train_net.cond: prev})
 
             if np.isnan(error):
                 print(batch, m, s, probs)
@@ -100,7 +125,7 @@ def train_teacher():
 
             else:
                 # use outputs as conditioning for other sample batches
-                prev = get_batch(file, batch_id, block_id - 1, batch_size, block_size)
+                prev = get_batch(audio_files, batch_id, block_id - 1, batch_size, block_size)
 
             if epoch >= 20:
 
@@ -154,7 +179,6 @@ def train_student():
         # regenerate the Teacher Wavenet and optimize
         teacher = TeacherWavenet(inputs=iaf.samples,
                                  cond=tf.tile(iaf.cond, [batch_size, 1, 1, 1]),
-                                 targets=None,
                                  filter_width=3,
                                  hidden_units=64,
                                  output_classes=2,
@@ -229,7 +253,10 @@ def main():
 
     # train Teacher Wavenet
     if sys.argv[1] == "-t":
-        train_teacher()
+
+        path = None if sys.argv[-1] == "-t" else sys.argv[2]
+
+        train_teacher(path)
 
     # train Student Wavenet
     if sys.argv[1] == "-s":
