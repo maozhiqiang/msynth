@@ -5,6 +5,7 @@ class TeacherWavenet(object):
 
     def __init__(self,
                  inputs,
+                 cond,
                  targets,
                  filter_width,
                  hidden_units,
@@ -29,11 +30,13 @@ class TeacherWavenet(object):
             # modify to have gated acitvation as in wavenet (i.e. create appropraiate function)
             lay_ = dilated_conv(lay_, "tanh_sig_{0}".format(i), filter_width, hidden_units, 1, trainable=training)
 
+            cond_ = dilated_conv(cond, "cond_{0}".format(i), filter_width, hidden_units, 1, trainable=training)
+
             mid = int(hidden_units / 2)
 
-            tanh = tf.tanh(lay_[:, :, :, :mid])
+            tanh = tf.tanh(lay_[:, :, :, :mid] + cond_[:, :, :, :mid])
 
-            sig = tf.sigmoid(lay_[:, :, :, mid:])
+            sig = tf.sigmoid(lay_[:, :, :, mid:] + cond_[:, :, :, mid:])
 
             lay_ = tanh * sig
 
@@ -59,7 +62,6 @@ class TeacherWavenet(object):
 
         skip = tf.nn.relu(skip)
 
-        # logits of the prob. Can recover prob with sig(logits)
         params = dilated_conv(skip,
                               "1x1_{0}".format(num_layers+2),
                               filter_width,
@@ -71,39 +73,27 @@ class TeacherWavenet(object):
         location = params[:, :, :, :mid]
 
         # ensure that the scale parameter is > 0
-        scale = tf.nn.relu(params[:, :, :, mid:]) + tf.log(1. + tf.exp(-tf.abs(params[:, :, :, mid:])))
+        scale = tf.abs(params[:, :, :, mid:])
 
-        logits = log_mixt(inputs, location, scale)
+        logistic = tf.contrib.distributions.Logistic(loc=location, scale=scale)
 
-        log_probs = -tf.log(1. + tf.exp(-tf.abs(logits)))
+        categorical = tf.distributions.Categorical(
+            probs=[1./(output_classes / 2) for _ in range(int(output_classes/2.))])
 
-        log_probs = tf.where(logits <= 0., log_probs + logits, log_probs)
+        mixture = tf.contrib.distributions.MixtureSameFamily(
+            mixture_distribution=categorical,
+            components_distribution=logistic
+        )
 
-        # Compute cross-entropy. Uses hard prob. Modify to allow soft prob also
-        loss = tf.reduce_mean(tf.reduce_sum(-log_probs, 2)) if training else None
-
-        train_step = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss) if training else None
+        log_probs = tf.expand_dims(mixture.log_prob(tf.squeeze(inputs, -1)), -1)
 
         self.inputs = inputs
+        self.cond = cond
         self.targets = targets
-        self.logits = logits
-        self.loss = loss
-        self.train_step = train_step
         self.scale = scale
         self.location = location
         self.log_probs = log_probs
-
-    """
-    This function trains the model using an Adam Optimizer to learn the optimal weights
-    
-    Returns:
-        Train Op
-    """
-    def train(self):
-
-        step = tf.train.AdamOptimizer(learning_rate=0.01).minimize(self.loss)
-
-        return step
+        self.mixture = mixture
 
 
 # Studente Wavenet components used to create an IAF object (the final student Wavenet)
@@ -111,14 +101,15 @@ class StudentWavenetComp(object):
 
     def __init__(self,
                  inputs,
+                 cond,
                  flow,
                  filter_width,
                  hidden_units,
                  output_classes,
                  training=True,
                  padding="VALID",
-                 num_layers=4,
-                 num_stages=2):
+                 num_layers=12,
+                 num_stages=4):
 
         assert hidden_units % 2 == 0 and output_classes % 2 == 0
 
@@ -146,11 +137,17 @@ class StudentWavenetComp(object):
                                 1,
                                 trainable=training)
 
+            cond_ = dilated_conv(cond, "flow_{0}_cond_{1}".format(flow, i),
+                                 filter_width,
+                                 hidden_units,
+                                 1,
+                                 trainable=training)
+
             mid = int(hidden_units / 2)
 
-            tanh = tf.tanh(lay_[:, :, :, :mid])
+            tanh = tf.tanh(lay_[:, :, :, :mid] + cond_[:, :, :, :mid])
 
-            sig = tf.sigmoid(lay_[:, :, :, mid:])
+            sig = tf.sigmoid(lay_[:, :, :, mid:] + cond_[:, :, :, mid:])
 
             lay_ = tanh * sig
 
@@ -167,23 +164,23 @@ class StudentWavenetComp(object):
         h = tf.nn.relu(h)
 
         params = dilated_conv(h,
-                               "flow_{0}_1x1_{1}".format(flow, num_layers + 1),
-                               filter_width,
-                               output_classes,
-                               trainable=training)
+                              "flow_{0}_1x1_{1}".format(flow, num_layers + 1),
+                              filter_width,
+                              output_classes,
+                              trainable=training)
 
         params = tf.nn.relu(params)
 
         # output mean and standard deviation for each sample. The 2 values of dimension 4
         params = dilated_conv(params,
-                               "flow_{0}_1x1_{1}".format(flow, num_layers + 2),
-                               filter_width,
-                               output_classes,
-                               trainable=training)
+                              "flow_{0}_1x1_{1}".format(flow, num_layers + 2),
+                              filter_width,
+                              output_classes,
+                              trainable=training)
 
         mid = int(output_classes / 2)
 
-        location = params[:, :, :, :mid] + 30.
+        location = params[:, :, :, :mid]
 
         # ensure that the scale paramters are > 0
         scale = tf.nn.relu(params[:, :, :, mid:]) + tf.log(1. + tf.exp(-tf.abs(params[:, :, :, mid:])))
@@ -199,11 +196,21 @@ class IAF(object):
 
     def __init__(self,
                  inputs,
+                 cond,
+                 teacher,
                  flows,
                  filter_width,
                  hidden_units,
                  output_classes,
+                 nb_mixtures,
                  training):
+
+        h, w, in_ch, out_ch = inputs.shape
+
+        h = int(h)
+        w = int(w)
+        in_ch = int(in_ch)
+        out_ch = int(out_ch)
 
         flow = inputs
 
@@ -216,10 +223,11 @@ class IAF(object):
             # Double check for the number of layers in individual flows
             # Need to have different layers for different flows
             block = StudentWavenetComp(inputs=flow,
+                                       cond=cond,
                                        flow=i,
                                        filter_width=filter_width,
                                        hidden_units=hidden_units,
-                                       output_classes=output_classes,
+                                       output_classes=2,
                                        training=training)
 
             flow = block.scale * flow + block.location
@@ -227,31 +235,17 @@ class IAF(object):
             location = location * block.scale + block.location
             scale = tf.abs(block.scale * scale)
 
-        # obtain the log probabilities for each sample
-        logits = log_mixt(flow, location, scale)
+        # logistic distribution
+        log_dist = tf.contrib.distributions.Logistic(loc=location, scale=scale)
 
-        # regenerate the Teacher Wavenet and optimize
-        teacher = TeacherWavenet(inputs=flow,
-                                 targets=None,
-                                 filter_width=3,
-                                 hidden_units=64,
-                                 output_classes=output_classes,
-                                 training=False)
-
-        # obtain non trainable weights
-        restore = [weight for weight in tf.global_variables() if weight not in tf.trainable_variables()]
-
-        # use the KL divergence instead and feed it the teacher probs output
-        loss = kl_div(teacher.log_probs, scale) if training else None
-
-        train_step = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss) if training else None
+        samples = log_dist.sample([inputs.shape[0]])
+        samples = tf.reshape(samples, [inputs.shape[0] * h, w, in_ch, out_ch])
 
         self.inputs = inputs
+        self.cond = cond
         self.outputs = discretize(flow, 65535.)
-        self.loss = loss
-        self.train_step = train_step
-        self.params = [location, scale]
-        self.test = teacher.log_probs
-        self.teach_logits = teacher.logits
-        self.restore = restore
-
+        self.samples = samples
+        self.location = location
+        self.scale = scale
+        self.teacher = teacher
+        self.dist = log_dist.log_prob(inputs)
